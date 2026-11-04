@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#141719" />
+  <meta name="description" content="Ross Bob is a local, stroke-by-stroke digital artist. Turn a reference image into a replayable brushstroke painting and export PNG, SVG or the drawing program." />
+  <title>Ross Bob | The Stroke Studio</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght,SOFT,WONK@9..144,400,20,1;9..144,600,20,1&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script type="module" src="./src/main.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Painting controls">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">rb<span>.</span></div>
+        <div class="brand-identity"><strong>Ross Bob</strong><span>THE STROKE STUDIO</span></div>
+        <span class="edition">BETA / 01</span>
+      </div>
+      <div class="sidebar-content">
+        <div class="sidebar-lead">
+          <span class="eyebrow"><span class="eyebrow-dot"></span> WELCOME TO THE STUDIO</span>
+          <h1>Not generated.<br /><em>Drawn.</em></h1>
+          <p>We break down a reference into real brush movements, then paint each stroke right before your eyes.</p>
+        </div>
+        <div class="section-head"><span>01</span><h2>Drawing style</h2></div>
+        <div class="preset-grid" role="group" aria-label="Painting style">
+          <button type="button" class="preset selected" data-preset="studio" aria-pressed="true"><span class="preset-icon studio-icon">✳</span><span>Studio</span><small>Balanced</small></button>
+          <button type="button" class="preset" data-preset="pencil" aria-pressed="false"><span class="preset-icon pencil-icon">⌁</span><span>Ink & pencil</span><small>Fine lines</small></button>
+          <button type="button" class="preset" data-preset="gouache" aria-pressed="false"><span class="preset-icon gouache-icon">◒</span><span>Gouache</span><small>Soft paint</small></button>
+          <button type="button" class="preset" data-preset="marker" aria-pressed="false"><span class="preset-icon marker-icon">▰</span><span>Marker</span><small>Bold strokes</small></button>
+        </div>
+        <div class="section-head settings-title"><span>02</span><h2>The brushwork</h2></div>
+        <div class="slider-control"><div class="slider-header"><label for="detail">Drawing detail</label><output id="detail-value" for="detail">3</output></div><input id="detail" type="range" min="1" max="5" step="1" value="3" /><div class="slider-scale"><span>Loose</span><span>Detailed</span></div></div>
+        <div class="slider-control"><div class="slider-header"><label for="palette">Paint colors</label><output id="palette-value" for="palette">14</output></div><input id="palette" type="range" min="4" max="24" step="1" value="14" /><div class="slider-scale"><span>Simple</span><span>Rich</span></div></div>
+        <div class="slider-control"><div class="slider-header"><label for="humanize">Human variation</label><output id="humanize-value" for="humanize">42%</output></div><input id="humanize" type="range" min="0" max="100" step="1" value="42" /><div class="slider-scale"><span>Controlled</span><span>Expressive</span></div></div>
+        <div class="sidebar-note"><span class="info-mark">i</span><p id="settings-note">Everything runs locally in your browser.</p></div>
+      </div>
+      <div class="sidebar-footer"><div class="private-dot"></div> NO UPLOADS. NO API KEYS. YOUR ART STAYS YOURS.</div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar"><div class="breadcrumbs"><span class="breadcrumb-muted">ROSS BOB</span><span class="separator">/</span><strong>YOUR STUDIO</strong></div><div class="topbar-right"><span class="local-pill"><span></span> LOCAL ENGINE</span><a href="https://github.com/Aspheral/ross-bob" target="_blank" rel="noopener noreferrer" class="github-link">VIEW SOURCE <span aria-hidden="true">↗</span></a></div></header>
+      <div class="workspace-content">
+        <header class="workspace-heading"><div><span class="eyebrow orange-eyebrow">AN ARTIST AT WORK</span><h2>Watch the work <em>take shape.</em></h2><p>Every mark is deliberate. Every line has a beginning and an end.</p></div><div class="session-mark">STUDIO SESSION <strong>001</strong></div></header>
+        <div class="workbench">
+          <section class="canvas-panel" aria-label="Drawing workbench">
+            <div class="panel-heading"><div class="panel-label"><span class="panel-number">A</span><div><strong>THE CANVAS</strong><small>LIVE BRUSHSTROKE RENDER</small></div></div><span class="live-label"><span></span> LIVE WORKSPACE</span></div>
+            <div class="canvas-outer"><div id="canvas-stage" class="canvas-stage" style="aspect-ratio: 760 / 560"><canvas id="drawing" width="760" height="560" aria-label="The painting canvas"></canvas><span id="brush-cursor" class="brush-cursor" hidden aria-hidden="true"></span></div></div>
+            <div class="canvas-toolbar"><div class="canvas-status"><span id="status-light" class="status-light" data-state="idle"></span><span id="status-text" role="status" aria-live="polite">Loading studio</span></div><div class="canvas-actions"><button type="button" id="replay-btn" class="text-button" disabled><span>↻</span> Replay</button><button type="button" id="reset-btn" class="text-button"><span>✕</span> Clear</button><div class="export-wrap" id="export-wrap"><button type="button" id="export-btn" class="outline-button" disabled>Export <span>▾</span></button><div class="export-menu" id="export-menu" hidden><button type="button" data-export="png"><b>PNG image</b><small>3× resolution · completed artwork</small></button><button type="button" data-export="svg"><b>SVG paths</b><small>Editable vector brushwork</small></button><button type="button" data-export="json"><b>Stroke program</b><small>All paths, colors & pressures</small></button></div></div></div></div>
+          </section>
+          <aside class="reference-panel" aria-label="Reference and painting queue">
+            <div class="panel-heading"><div class="panel-label"><span class="panel-number">B</span><div><strong>THE REFERENCE</strong><small>WHAT ROSS SEES</small></div></div></div>
+            <div class="reference-body">
+              <div class="reference-preview" id="upload-zone"><div id="reference-frame" class="reference-frame" style="aspect-ratio: 760 / 560"><canvas id="reference" width="760" height="560" aria-label="Your original reference image"></canvas></div><span class="reference-sticker" id="source-badge">DEMO IMAGE</span></div>
+              <div class="reference-file"><div class="file-info"><strong id="image-name">Studio demo</strong><small id="image-size">Preparing image</small></div><button type="button" class="change-button" id="change-btn" aria-label="Change reference image">↗</button></div>
+              <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden />
+              <button type="button" id="upload-btn" class="upload-button"><span aria-hidden="true">＋</span> Choose your own image</button>
+              <button type="button" id="demo-btn" class="demo-button">Try with the studio demo ↗</button>
+              <div class="divider"></div>
+              <div class="mini-head">A LOOK AT THE PALETTE <span>COLOR STUDY</span></div>
+              <div class="palette-preview" id="palette-preview"><span class="palette-hint">Colors appear when painting starts.</span></div>
+              <div class="divider"></div>
+              <div class="mini-head">BRUSHSTROKE REPORT <span>LIVE COUNTS</span></div>
+              <div class="metric-row"><span>Paint strokes</span><strong id="planned-count">0</strong></div>
+              <div class="metric-row"><span>Contours mapped</span><strong id="line-count">0</strong></div>
+              <div class="metric-row"><span>Strokes drawn</span><strong id="stroke-count">0</strong></div>
+            </div>
+            <div class="reference-bottom"><span class="tip-star">✳</span><p>Ross plans a sequence of strokes. He never pastes the photo onto the finished canvas.</p></div>
+          </aside>
+        </div>
+
+        <section class="playback-panel" aria-label="Playback controls">
+          <div class="playback-top"><div><span class="eyebrow orange-eyebrow">03 / TIME TO PAINT</span><h3>The making of a painting.</h3></div><div class="playback-buttons"><button type="button" id="pause-btn" class="secondary-button" disabled>Pause</button><button type="button" id="start-btn" class="primary-button">Start painting <span>↗</span></button></div></div>
+          <div class="progress-row"><div class="progress-bar" role="progressbar" aria-label="Painting progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-bar"><div class="progress-fill" id="progress-fill"></div></div><span id="progress-text" class="progress-text">0%</span></div>
+          <div class="playback-bottom"><span>SKETCH → COLOR BLOCKING → DETAILS</span><div class="speed-control"><label for="speed">BRUSH SPEED</label><input id="speed" type="range" min="1" max="5" step="1" value="4" /><output id="speed-value" for="speed">4×</output></div></div>
+        </section>
+        <footer class="page-footer"><span>MADE WITH CODE, CURIOSITY & A LOT OF BRUSHSTROKES.</span><span>ROSS BOB / EXPERIMENTAL STUDIO v0.1</span></footer>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
