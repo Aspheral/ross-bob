@@ -83,22 +83,71 @@ function nearestPalette(pixel, palette) {
   }
   return best;
 }
-function interpolateStroke(x1, y1, x2, y2, rand, amount, wave = 3) {
+/**
+ * Detect a local shape tangent from RGB image gradients. Color-sensitive
+ * structure detects boundaries even when two colors share luminance.
+ */
+function flowAt(pixels, width, height, x, y, direction) {
+  if (width < 5 || height < 5) return { slope: 0, weight: 0 };
+  const cx = clamp(Math.round(x), 2, width - 3), cy = clamp(Math.round(y), 2, height - 3);
+  const l = pixels[cy * width + cx - 2], r = pixels[cy * width + cx + 2];
+  const u = pixels[(cy - 2) * width + cx], d = pixels[(cy + 2) * width + cx];
+  let xx = 0, xy = 0, yy = 0;
+  for (let c = 0; c < 3; c++) {
+    const gx = r[c] - l[c], gy = d[c] - u[c];
+    xx += gx * gx; xy += gx * gy; yy += gy * gy;
+  }
+  const energy = xx + yy;
+  if (energy < 90) return { slope: 0, weight: 0 };
+  const normal = Math.atan2(2 * xy, xx - yy) * .5;
+  let tx = -Math.sin(normal), ty = Math.cos(normal);
+  if (tx * direction < 0) { tx = -tx; ty = -ty; }
+  return {
+    slope: clamp(ty / (Math.abs(tx) + .32), -1.1, 1.1),
+    weight: clamp((Math.sqrt(energy) - 9) / 90, 0, 1)
+  };
+}
+
+/**
+ * Form-aware curved gesture. Stroke pressure has a light landing, a full
+ * body and a fine lift-off; the bend comes from local image structure.
+ */
+function interpolateStroke(x1, y1, x2, y2, rand, amount, brushWidth, pixels, imageWidth, imageHeight, region) {
   const dx = x2 - x1, dy = y2 - y1, length = Math.hypot(dx, dy);
-  const nx = length ? -dy / length : 0, ny = length ? dx / length : 1;
+  const direction = dx < 0 ? -1 : 1;
+  const f1 = flowAt(pixels, imageWidth, imageHeight, x1 + dx * .3, y1 + dy * .3, direction);
+  const f2 = flowAt(pixels, imageWidth, imageHeight, x1 + dx * .7, y1 + dy * .7, direction);
+  const bow1 = f1.slope * length * .20 * f1.weight;
+  const bow2 = f2.slope * length * .20 * f2.weight;
+  const gesture = (rand() - .5) * (1.4 + amount * 2.5);
+  const phase = rand() * Math.PI * 2;
+  const maxBend = Math.min(length * .26, Math.max(1.2, brushWidth * 2.3));
+  const n = Math.max(2, Math.ceil(length / 5));
   const points = [];
-  const n = Math.max(2, Math.ceil(length / 14));
   for (let i = 0; i <= n; i++) {
-    const t = i / n, taper = Math.sin(Math.PI * t);
-    const offset = (rand() - .5) * 2 * amount * taper + Math.sin(t * Math.PI * wave) * amount * .35 * taper;
-    points.push({
-      x: +(x1 + dx * t + nx * offset).toFixed(2),
-      y: +(y1 + dy * t + ny * offset).toFixed(2),
-      p: +(0.74 + .22 * Math.sin(Math.PI * t) + (rand() - .5) * .08).toFixed(3)
-    });
+    const t = i / n, envelope = Math.sin(Math.PI * t);
+    const flowBend = bow1 * (1 - t) + bow2 * t;
+    const curl = (bow2 - bow1) * Math.sin(Math.PI * 2 * t) * .21;
+    const freehand = gesture * Math.sin(Math.PI * t * 1.32) +
+      amount * .3 * Math.sin(3.1 * Math.PI * t + phase) * envelope;
+    const bend = clamp((flowBend + curl + freehand) * envelope, -maxBend, maxBend);
+    const x = x1 + dx * t, baseY = y1 + dy * t;
+    let y = clamp(baseY + bend, 0, imageHeight - 1);
+    // Bend inside the chosen color region instead of bleeding into neighbors.
+    if (region && !region(clamp(Math.round(x), 0, imageWidth - 1), Math.round(y))) {
+      for (const factor of [.6, .3, 0]) {
+        const candidate = clamp(baseY + bend * factor, 0, imageHeight - 1);
+        if (region(clamp(Math.round(x), 0, imageWidth - 1), Math.round(candidate))) { y = candidate; break; }
+      }
+    }
+    const pressure = clamp(.24 + .82 * Math.pow(envelope, .65) +
+      .1 * Math.sin(2 * Math.PI * t + phase) * envelope +
+      .04 * Math.sin(Math.PI * t * 3) * envelope, .16, 1.15);
+    points.push({x: +x.toFixed(2), y: +y.toFixed(2), p: +pressure.toFixed(3)});
   }
   return points;
 }
+
 function localContrast(colors, width, x, y, height) {
   const pos = y * width + x;
   const x1 = colors[pos - 1], x2 = colors[pos + 1];
@@ -146,10 +195,17 @@ function traceEdges(rgb, width, height, threshold, rand, strokeWidth, opacity, m
         if (!next) break;
         [cx,cy,vx,vy] = next;
       }
-      if (points.length >= 4) strokes.push({
-        kind: "contour", color: "#27252a", alpha: opacity,
-        width: strokeWidth * (.72 + rand()*.35), points
-      });
+      if (points.length >= 4) {
+        const phase = rand() * Math.PI * 2;
+        const shaped = points.map((p, i) => {
+          const t = i / (points.length - 1), lift = Math.pow(Math.sin(Math.PI * t), .52);
+          return {x: p.x, y: p.y, p: +clamp(.18 + .86 * lift + .07 * lift * Math.sin(phase + t * Math.PI * 3), .16, 1.1).toFixed(3)};
+        });
+        strokes.push({
+          kind: "contour", color: "#27252a", alpha: opacity,
+          width: strokeWidth * (.72 + rand()*.35), points: shaped
+        });
+      }
     }
   }
   return strokes;
@@ -208,7 +264,7 @@ export function planPainting(source, settings = {}) {
         kind:"paint", color:rgbToHex(palette[index]),
         width:gap*(.94 + rand()*.18),
         alpha:clamp(.88 + rand()*.12,0,1),
-        points:interpolateStroke(start,y1,end,y2,rand,jitter)
+        points:interpolateStroke(start,y1,end,y2,rand,jitter,gap,pixels,width,height,(px,py)=>smoothed[py*width+px]===index)
       });
     }
   }
@@ -220,7 +276,7 @@ export function planPainting(source, settings = {}) {
   ));
   const [backgroundIndex] = frequency.map((count,i)=>[count,i]).sort((a,b)=>b[0]-a[0]).map(x=>x[1]);
   return {
-    version:1, width,height,
+    version:2, width,height,
     paper:"#f6f2eb",
     dominantColor:rgbToHex(palette[backgroundIndex]),
     palette:palette.map(rgbToHex),
@@ -229,38 +285,100 @@ export function planPainting(source, settings = {}) {
   };
 }
 
-/** Replayable, pressure-aware stroke rasterization, also used by PNG export. */
-export function paintStroke(ctx, stroke, pointLimit = stroke.points.length) {
-  const pts=stroke.points, limit=Math.min(pts.length,pointLimit);
-  if (!limit) return;
-  ctx.save();
-  ctx.strokeStyle=stroke.color;
-  ctx.fillStyle=stroke.color;
-  ctx.globalAlpha=stroke.alpha;
-  ctx.lineCap="round";
-  ctx.lineJoin="round";
-  if (limit===1 || (limit===2 && pts[0].x===pts[1].x && pts[0].y===pts[1].y)) {
-    ctx.beginPath();
-    ctx.arc(pts[0].x,pts[0].y,stroke.width*pts[0].p*.5,0,Math.PI*2);
-    ctx.fill();
-  } else {
-    for (let i=1;i<limit;i++) {
-      ctx.beginPath();
-      ctx.lineWidth=stroke.width*(pts[i-1].p+pts[i].p)*.5;
-      ctx.moveTo(pts[i-1].x,pts[i-1].y);
-      ctx.lineTo(pts[i].x,pts[i].y);
-      ctx.stroke();
-    }
+/**
+ * A pressure ribbon with a curved centerline and a different radius at every
+ * recorded point. The same sides power both Canvas and actual filled SVG
+ * silhouettes, so vector export retains taper instead of fixed-width lines.
+ */
+export function ribbonGeometry(stroke, pointLimit = stroke.points.length) {
+  const points = stroke.points.slice(0, Math.max(0, Math.min(stroke.points.length, Math.floor(pointLimit))));
+  if (!points.length) return null;
+  const left = [], right = [], radii = [];
+  for (let i = 0; i < points.length; i++) {
+    const before = points[Math.max(0, i - 1)], after = points[Math.min(points.length - 1, i + 1)];
+    let dx = after.x - before.x, dy = after.y - before.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 1e-6) { dx = 1; dy = 0; } else { dx /= length; dy /= length; }
+    const radius = stroke.width * clamp(Number(points[i].p) || .2, .04, 2) * .5;
+    radii.push(radius);
+    left.push({x: points[i].x - dy * radius, y: points[i].y + dx * radius});
+    right.push({x: points[i].x + dy * radius, y: points[i].y - dx * radius});
   }
+  return {points, left, right, radii};
+}
+
+function midpoint(a, b) {
+  return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
+}
+function smoothSide(ctx, side) {
+  for (let i = 1; i < side.length - 1; i++) {
+    const m = midpoint(side[i], side[i + 1]);
+    ctx.quadraticCurveTo(side[i].x, side[i].y, m.x, m.y);
+  }
+  const last = side[side.length - 1];
+  ctx.lineTo(last.x, last.y);
+}
+function svgSide(side) {
+  const number = n => (+n.toFixed(3)).toString();
+  let result = "";
+  for (let i = 1; i < side.length - 1; i++) {
+    const m = midpoint(side[i], side[i + 1]);
+    result += " Q " + number(side[i].x) + " " + number(side[i].y) + " " + number(m.x) + " " + number(m.y);
+  }
+  const end = side[side.length - 1];
+  return result + " L " + number(end.x) + " " + number(end.y);
+}
+
+/** Fill a smoothly edged, variably thick brush mark. */
+export function paintStroke(ctx, stroke, pointLimit = stroke.points.length) {
+  const g = ribbonGeometry(stroke, pointLimit);
+  if (!g) return;
+  ctx.save();
+  ctx.fillStyle = stroke.color;
+  ctx.globalAlpha = stroke.alpha;
+  ctx.beginPath();
+  if (g.points.length === 1) {
+    ctx.arc(g.points[0].x, g.points[0].y, g.radii[0], 0, Math.PI * 2);
+  } else {
+    const last = g.points.length - 1;
+    const endAngle = Math.atan2(g.left[last].y - g.points[last].y, g.left[last].x - g.points[last].x);
+    const startAngle = Math.atan2(g.left[0].y - g.points[0].y, g.left[0].x - g.points[0].x);
+    ctx.moveTo(g.left[0].x, g.left[0].y);
+    smoothSide(ctx, g.left);
+    // Counterclockwise semicircles round the tip and the landing.
+    ctx.arc(g.points[last].x, g.points[last].y, g.radii[last], endAngle, endAngle - Math.PI, true);
+    smoothSide(ctx, [...g.right].reverse());
+    ctx.arc(g.points[0].x, g.points[0].y, g.radii[0], startAngle - Math.PI, startAngle - Math.PI * 2, true);
+    ctx.closePath();
+  }
+  ctx.fill();
   ctx.restore();
 }
 
+/** Export each genuine pressure ribbon as one editable vector shape. */
 export function strokePlanToSVG(plan) {
   if (!plan || !Array.isArray(plan.strokes)) throw new TypeError("Invalid drawing plan");
-  const escape=(s)=>String(s).replaceAll("&","&amp;").replaceAll('"',"&quot;").replaceAll("<","&lt;");
-  const paths=plan.strokes.map(s=>{
-    const path=s.points.map((p,i)=>(i?"L":"M")+p.x+" "+p.y).join(" ");
-    return '<path d="'+escape(path)+'" fill="none" stroke="'+escape(s.color)+'" stroke-width="'+s.width.toFixed(2)+'" stroke-opacity="'+s.alpha.toFixed(3)+'" stroke-linecap="round" stroke-linejoin="round"/>';
+  const escape = s => String(s).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+  const n = v => (+v.toFixed(3)).toString();
+  const paths = plan.strokes.map(s => {
+    const g = ribbonGeometry(s);
+    if (!g) return "";
+    let d;
+    if (g.points.length === 1) {
+      const p = g.points[0], r = g.radii[0];
+      d = "M " + n(p.x+r) + " " + n(p.y) + " A " + n(r) + " " + n(r) + " 0 1 0 " + n(p.x-r) + " " + n(p.y) +
+          " A " + n(r) + " " + n(r) + " 0 1 0 " + n(p.x+r) + " " + n(p.y) + " Z";
+    } else {
+      const last = g.points.length - 1, L = g.left[0];
+      const R = g.right[last], rEnd = g.radii[last], rStart = g.radii[0];
+      d = "M " + n(L.x) + " " + n(L.y) + svgSide(g.left) +
+        " A " + n(rEnd) + " " + n(rEnd) + " 0 0 0 " + n(R.x) + " " + n(R.y) +
+        svgSide([...g.right].reverse()) +
+        " A " + n(rStart) + " " + n(rStart) + " 0 0 0 " + n(L.x) + " " + n(L.y) + " Z";
+    }
+    return '<path d="' + escape(d) + '" fill="' + escape(s.color) + '" fill-opacity="' + n(s.alpha) + '"/>';
   });
-  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+plan.width+' '+plan.height+'" width="'+plan.width+'" height="'+plan.height+'">\n<rect width="100%" height="100%" fill="'+escape(plan.paper)+'"/>\n'+paths.join("\n")+'\n</svg>';
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + plan.width + ' ' + plan.height +
+    '" width="' + plan.width + '" height="' + plan.height + '">\n<rect width="100%" height="100%" fill="' +
+    escape(plan.paper) + '"/>\n' + paths.join("\n") + '\n</svg>';
 }
