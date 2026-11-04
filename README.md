@@ -24,7 +24,7 @@ Image analysis is fully local. Your reference file stays in your browser.
 
 Unlike a typical image-generation interface, Ross Bob's output is an actual **drawing program**:
 
-\`\`\`text
+```text
 Reference image
      │
      ▼
@@ -48,7 +48,7 @@ Replay strokes on a clean canvas
      ├── PNG  (raster image)
      ├── SVG  (editable paths)
      └── JSON (replayable stroke instructions)
-\`\`\`
+```
 
 Each stroke has its own color, opacity, width, sequence position, and a series of pressure-tagged points. Strokes have slight path variation to keep them from looking like rigid horizontal computer lines. The playback animates the individual segments and moves a visible brush cursor.
 
@@ -58,11 +58,11 @@ Each stroke has its own color, opacity, width, sequence position, and a series o
 
 | Path | Purpose |
 | --- | --- |
-| \`index.html\` | Studio shell and accessible controls |
-| \`styles.css\` | Responsive studio visual system |
-| \`src/engine.js\` | Pure stroke planner, palette reduction, contour extraction, rasterizer and SVG exporter |
-| \`src/main.js\` | File handling, playback, settings and downloads |
-| \`test/engine.test.js\` | Pure Node tests for palette, planning, determinism, export and rendering |
+| `index.html` | Studio shell and accessible controls |
+| `styles.css` | Responsive studio visual system |
+| `src/engine.js` | Pure stroke planner, palette reduction, contour extraction, rasterizer and SVG exporter |
+| `src/main.js` | File handling, playback, settings and downloads |
+| `test/engine.test.js` | Pure Node tests for palette, planning, determinism, export and rendering |
 
 The prototype uses **vanilla JavaScript, Canvas 2D, and ES modules**. No browser framework, image generation backend, or API keys are required.
 
@@ -70,20 +70,20 @@ The prototype uses **vanilla JavaScript, Canvas 2D, and ES modules**. No browser
 
 Use Node.js 20 or later to run the tests:
 
-\`\`\`bash
+```bash
 git clone https://github.com/Aspheral/ross-bob.git
 cd ross-bob
 npm test
-\`\`\`
+```
 
 To serve the studio locally, run either:
 
-\`\`\`bash
+```bash
 python3 -m http.server 3000
 # Then visit http://localhost:3000
-\`\`\`
+```
 
-or any other static HTTP server that supports ES modules. Opening \`index.html\` via \`file://\` is not recommended because browser module security restrictions vary.
+or any other static HTTP server that supports ES modules. Opening `index.html` via `file://` is not recommended because browser module security restrictions vary.
 
 ## Deploy
 
