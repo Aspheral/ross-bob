@@ -176,6 +176,10 @@ function paintLine(stroke, a, b) {
   paintStroke(ctx, { ...stroke, points: [a,b] });
   pointer.style.left = (100*b.x/drawing.width) + "%";
   pointer.style.top = (100*b.y/drawing.height) + "%";
+  const screenScale = stage.clientWidth / drawing.width;
+  const brushDiameter = clamp(stroke.width * b.p * screenScale + 5, 7, 34);
+  pointer.style.width = brushDiameter.toFixed(1) + "px";
+  pointer.style.height = brushDiameter.toFixed(1) + "px";
   pointer.hidden = false;
 }
 function speedInSegments() {
