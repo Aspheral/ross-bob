@@ -1,0 +1,13 @@
+{
+  "name": "ross-bob",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A brushstroke-first digital painting studio.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
