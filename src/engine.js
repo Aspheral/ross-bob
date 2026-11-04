@@ -285,38 +285,100 @@ export function planPainting(source, settings = {}) {
   };
 }
 
-/** Replayable, pressure-aware stroke rasterization, also used by PNG export. */
-export function paintStroke(ctx, stroke, pointLimit = stroke.points.length) {
-  const pts=stroke.points, limit=Math.min(pts.length,pointLimit);
-  if (!limit) return;
-  ctx.save();
-  ctx.strokeStyle=stroke.color;
-  ctx.fillStyle=stroke.color;
-  ctx.globalAlpha=stroke.alpha;
-  ctx.lineCap="round";
-  ctx.lineJoin="round";
-  if (limit===1 || (limit===2 && pts[0].x===pts[1].x && pts[0].y===pts[1].y)) {
-    ctx.beginPath();
-    ctx.arc(pts[0].x,pts[0].y,stroke.width*pts[0].p*.5,0,Math.PI*2);
-    ctx.fill();
-  } else {
-    for (let i=1;i<limit;i++) {
-      ctx.beginPath();
-      ctx.lineWidth=stroke.width*(pts[i-1].p+pts[i].p)*.5;
-      ctx.moveTo(pts[i-1].x,pts[i-1].y);
-      ctx.lineTo(pts[i].x,pts[i].y);
-      ctx.stroke();
-    }
+/**
+ * A pressure ribbon with a curved centerline and a different radius at every
+ * recorded point. The same sides power both Canvas and actual filled SVG
+ * silhouettes, so vector export retains taper instead of fixed-width lines.
+ */
+export function ribbonGeometry(stroke, pointLimit = stroke.points.length) {
+  const points = stroke.points.slice(0, Math.max(0, Math.min(stroke.points.length, Math.floor(pointLimit))));
+  if (!points.length) return null;
+  const left = [], right = [], radii = [];
+  for (let i = 0; i < points.length; i++) {
+    const before = points[Math.max(0, i - 1)], after = points[Math.min(points.length - 1, i + 1)];
+    let dx = after.x - before.x, dy = after.y - before.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 1e-6) { dx = 1; dy = 0; } else { dx /= length; dy /= length; }
+    const radius = stroke.width * clamp(Number(points[i].p) || .2, .04, 2) * .5;
+    radii.push(radius);
+    left.push({x: points[i].x - dy * radius, y: points[i].y + dx * radius});
+    right.push({x: points[i].x + dy * radius, y: points[i].y - dx * radius});
   }
+  return {points, left, right, radii};
+}
+
+function midpoint(a, b) {
+  return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
+}
+function smoothSide(ctx, side) {
+  for (let i = 1; i < side.length - 1; i++) {
+    const m = midpoint(side[i], side[i + 1]);
+    ctx.quadraticCurveTo(side[i].x, side[i].y, m.x, m.y);
+  }
+  const last = side[side.length - 1];
+  ctx.lineTo(last.x, last.y);
+}
+function svgSide(side) {
+  const number = n => (+n.toFixed(3)).toString();
+  let result = "";
+  for (let i = 1; i < side.length - 1; i++) {
+    const m = midpoint(side[i], side[i + 1]);
+    result += " Q " + number(side[i].x) + " " + number(side[i].y) + " " + number(m.x) + " " + number(m.y);
+  }
+  const end = side[side.length - 1];
+  return result + " L " + number(end.x) + " " + number(end.y);
+}
+
+/** Fill a smoothly edged, variably thick brush mark. */
+export function paintStroke(ctx, stroke, pointLimit = stroke.points.length) {
+  const g = ribbonGeometry(stroke, pointLimit);
+  if (!g) return;
+  ctx.save();
+  ctx.fillStyle = stroke.color;
+  ctx.globalAlpha = stroke.alpha;
+  ctx.beginPath();
+  if (g.points.length === 1) {
+    ctx.arc(g.points[0].x, g.points[0].y, g.radii[0], 0, Math.PI * 2);
+  } else {
+    const last = g.points.length - 1;
+    const endAngle = Math.atan2(g.left[last].y - g.points[last].y, g.left[last].x - g.points[last].x);
+    const startAngle = Math.atan2(g.left[0].y - g.points[0].y, g.left[0].x - g.points[0].x);
+    ctx.moveTo(g.left[0].x, g.left[0].y);
+    smoothSide(ctx, g.left);
+    // Counterclockwise semicircles round the tip and the landing.
+    ctx.arc(g.points[last].x, g.points[last].y, g.radii[last], endAngle, endAngle - Math.PI, true);
+    smoothSide(ctx, [...g.right].reverse());
+    ctx.arc(g.points[0].x, g.points[0].y, g.radii[0], startAngle - Math.PI, startAngle - Math.PI * 2, true);
+    ctx.closePath();
+  }
+  ctx.fill();
   ctx.restore();
 }
 
+/** Export each genuine pressure ribbon as one editable vector shape. */
 export function strokePlanToSVG(plan) {
   if (!plan || !Array.isArray(plan.strokes)) throw new TypeError("Invalid drawing plan");
-  const escape=(s)=>String(s).replaceAll("&","&amp;").replaceAll('"',"&quot;").replaceAll("<","&lt;");
-  const paths=plan.strokes.map(s=>{
-    const path=s.points.map((p,i)=>(i?"L":"M")+p.x+" "+p.y).join(" ");
-    return '<path d="'+escape(path)+'" fill="none" stroke="'+escape(s.color)+'" stroke-width="'+s.width.toFixed(2)+'" stroke-opacity="'+s.alpha.toFixed(3)+'" stroke-linecap="round" stroke-linejoin="round"/>';
+  const escape = s => String(s).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+  const n = v => (+v.toFixed(3)).toString();
+  const paths = plan.strokes.map(s => {
+    const g = ribbonGeometry(s);
+    if (!g) return "";
+    let d;
+    if (g.points.length === 1) {
+      const p = g.points[0], r = g.radii[0];
+      d = "M " + n(p.x+r) + " " + n(p.y) + " A " + n(r) + " " + n(r) + " 0 1 0 " + n(p.x-r) + " " + n(p.y) +
+          " A " + n(r) + " " + n(r) + " 0 1 0 " + n(p.x+r) + " " + n(p.y) + " Z";
+    } else {
+      const last = g.points.length - 1, L = g.left[0];
+      const R = g.right[last], rEnd = g.radii[last], rStart = g.radii[0];
+      d = "M " + n(L.x) + " " + n(L.y) + svgSide(g.left) +
+        " A " + n(rEnd) + " " + n(rEnd) + " 0 0 0 " + n(R.x) + " " + n(R.y) +
+        svgSide([...g.right].reverse()) +
+        " A " + n(rStart) + " " + n(rStart) + " 0 0 0 " + n(L.x) + " " + n(L.y) + " Z";
+    }
+    return '<path d="' + escape(d) + '" fill="' + escape(s.color) + '" fill-opacity="' + n(s.alpha) + '"/>';
   });
-  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+plan.width+' '+plan.height+'" width="'+plan.width+'" height="'+plan.height+'">\n<rect width="100%" height="100%" fill="'+escape(plan.paper)+'"/>\n'+paths.join("\n")+'\n</svg>';
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + plan.width + ' ' + plan.height +
+    '" width="' + plan.width + '" height="' + plan.height + '">\n<rect width="100%" height="100%" fill="' +
+    escape(plan.paper) + '"/>\n' + paths.join("\n") + '\n</svg>';
 }
