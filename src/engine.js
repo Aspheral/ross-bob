@@ -83,22 +83,71 @@ function nearestPalette(pixel, palette) {
   }
   return best;
 }
-function interpolateStroke(x1, y1, x2, y2, rand, amount, wave = 3) {
+/**
+ * Detect a local shape tangent from RGB image gradients. Color-sensitive
+ * structure detects boundaries even when two colors share luminance.
+ */
+function flowAt(pixels, width, height, x, y, direction) {
+  if (width < 5 || height < 5) return { slope: 0, weight: 0 };
+  const cx = clamp(Math.round(x), 2, width - 3), cy = clamp(Math.round(y), 2, height - 3);
+  const l = pixels[cy * width + cx - 2], r = pixels[cy * width + cx + 2];
+  const u = pixels[(cy - 2) * width + cx], d = pixels[(cy + 2) * width + cx];
+  let xx = 0, xy = 0, yy = 0;
+  for (let c = 0; c < 3; c++) {
+    const gx = r[c] - l[c], gy = d[c] - u[c];
+    xx += gx * gx; xy += gx * gy; yy += gy * gy;
+  }
+  const energy = xx + yy;
+  if (energy < 90) return { slope: 0, weight: 0 };
+  const normal = Math.atan2(2 * xy, xx - yy) * .5;
+  let tx = -Math.sin(normal), ty = Math.cos(normal);
+  if (tx * direction < 0) { tx = -tx; ty = -ty; }
+  return {
+    slope: clamp(ty / (Math.abs(tx) + .32), -1.1, 1.1),
+    weight: clamp((Math.sqrt(energy) - 9) / 90, 0, 1)
+  };
+}
+
+/**
+ * Form-aware curved gesture. Stroke pressure has a light landing, a full
+ * body and a fine lift-off; the bend comes from local image structure.
+ */
+function interpolateStroke(x1, y1, x2, y2, rand, amount, brushWidth, pixels, imageWidth, imageHeight, region) {
   const dx = x2 - x1, dy = y2 - y1, length = Math.hypot(dx, dy);
-  const nx = length ? -dy / length : 0, ny = length ? dx / length : 1;
+  const direction = dx < 0 ? -1 : 1;
+  const f1 = flowAt(pixels, imageWidth, imageHeight, x1 + dx * .3, y1 + dy * .3, direction);
+  const f2 = flowAt(pixels, imageWidth, imageHeight, x1 + dx * .7, y1 + dy * .7, direction);
+  const bow1 = f1.slope * length * .20 * f1.weight;
+  const bow2 = f2.slope * length * .20 * f2.weight;
+  const gesture = (rand() - .5) * (1.4 + amount * 2.5);
+  const phase = rand() * Math.PI * 2;
+  const maxBend = Math.min(length * .26, Math.max(1.2, brushWidth * 2.3));
+  const n = Math.max(2, Math.ceil(length / 5));
   const points = [];
-  const n = Math.max(2, Math.ceil(length / 14));
   for (let i = 0; i <= n; i++) {
-    const t = i / n, taper = Math.sin(Math.PI * t);
-    const offset = (rand() - .5) * 2 * amount * taper + Math.sin(t * Math.PI * wave) * amount * .35 * taper;
-    points.push({
-      x: +(x1 + dx * t + nx * offset).toFixed(2),
-      y: +(y1 + dy * t + ny * offset).toFixed(2),
-      p: +(0.74 + .22 * Math.sin(Math.PI * t) + (rand() - .5) * .08).toFixed(3)
-    });
+    const t = i / n, envelope = Math.sin(Math.PI * t);
+    const flowBend = bow1 * (1 - t) + bow2 * t;
+    const curl = (bow2 - bow1) * Math.sin(Math.PI * 2 * t) * .21;
+    const freehand = gesture * Math.sin(Math.PI * t * 1.32) +
+      amount * .3 * Math.sin(3.1 * Math.PI * t + phase) * envelope;
+    const bend = clamp((flowBend + curl + freehand) * envelope, -maxBend, maxBend);
+    const x = x1 + dx * t, baseY = y1 + dy * t;
+    let y = clamp(baseY + bend, 0, imageHeight - 1);
+    // Bend inside the chosen color region instead of bleeding into neighbors.
+    if (region && !region(clamp(Math.round(x), 0, imageWidth - 1), Math.round(y))) {
+      for (const factor of [.6, .3, 0]) {
+        const candidate = clamp(baseY + bend * factor, 0, imageHeight - 1);
+        if (region(clamp(Math.round(x), 0, imageWidth - 1), Math.round(candidate))) { y = candidate; break; }
+      }
+    }
+    const pressure = clamp(.24 + .82 * Math.pow(envelope, .65) +
+      .1 * Math.sin(2 * Math.PI * t + phase) * envelope +
+      .04 * Math.sin(Math.PI * t * 3) * envelope, .16, 1.15);
+    points.push({x: +x.toFixed(2), y: +y.toFixed(2), p: +pressure.toFixed(3)});
   }
   return points;
 }
+
 function localContrast(colors, width, x, y, height) {
   const pos = y * width + x;
   const x1 = colors[pos - 1], x2 = colors[pos + 1];
@@ -146,10 +195,17 @@ function traceEdges(rgb, width, height, threshold, rand, strokeWidth, opacity, m
         if (!next) break;
         [cx,cy,vx,vy] = next;
       }
-      if (points.length >= 4) strokes.push({
-        kind: "contour", color: "#27252a", alpha: opacity,
-        width: strokeWidth * (.72 + rand()*.35), points
-      });
+      if (points.length >= 4) {
+        const phase = rand() * Math.PI * 2;
+        const shaped = points.map((p, i) => {
+          const t = i / (points.length - 1), lift = Math.pow(Math.sin(Math.PI * t), .52);
+          return {x: p.x, y: p.y, p: +clamp(.18 + .86 * lift + .07 * lift * Math.sin(phase + t * Math.PI * 3), .16, 1.1).toFixed(3)};
+        });
+        strokes.push({
+          kind: "contour", color: "#27252a", alpha: opacity,
+          width: strokeWidth * (.72 + rand()*.35), points: shaped
+        });
+      }
     }
   }
   return strokes;
@@ -208,7 +264,7 @@ export function planPainting(source, settings = {}) {
         kind:"paint", color:rgbToHex(palette[index]),
         width:gap*(.94 + rand()*.18),
         alpha:clamp(.88 + rand()*.12,0,1),
-        points:interpolateStroke(start,y1,end,y2,rand,jitter)
+        points:interpolateStroke(start,y1,end,y2,rand,jitter,gap,pixels,width,height,(px,py)=>smoothed[py*width+px]===index)
       });
     }
   }
@@ -220,7 +276,7 @@ export function planPainting(source, settings = {}) {
   ));
   const [backgroundIndex] = frequency.map((count,i)=>[count,i]).sort((a,b)=>b[0]-a[0]).map(x=>x[1]);
   return {
-    version:1, width,height,
+    version:2, width,height,
     paper:"#f6f2eb",
     dominantColor:rgbToHex(palette[backgroundIndex]),
     palette:palette.map(rgbToHex),
